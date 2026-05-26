@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drive Gallery</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+
+  <style>
+    body { background: #f8f9fa; display: flex; flex-direction: column; min-height: 100vh; }
+    main { flex: 1; }
+.gallery-img {
+      width: 100%; height: 240px; object-fit: cover; border-radius: 12px;
+      transition: all 0.3s; cursor: pointer;
+    }
+.gallery-img:hover { transform: scale(1.04); box-shadow: 0 8px 20px rgba(0,0,0,0.15); }
+.card-date { font-size: 0.75rem; color: #6c757d; }
+.modal-content.bg-dark { background: rgba(0,0,0,0.95)!important; border: none; }
+.modal-img { max-height: 85vh; object-fit: contain; }
+.modal-nav {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,0.15); border: none;
+      width: 50px; height: 50px; border-radius: 50%;
+      color: white; font-size: 1.5rem; z-index: 1056;
+    }
+.modal-nav:hover { background: rgba(255,255,255,0.3); }
+.modal-nav.prev { left: 20px; }
+.modal-nav.next { right: 20px; }
+    footer { background: #212529; }
+  .filter-bar { max-width: 500px; margin: 0 auto 1.5rem; }
+  </style>
+</head>
+<body>
+
+  <nav class="navbar navbar-dark bg-dark shadow-sm">
+    <div class="container">
+      <a class="navbar-brand d-flex align-items-center" href="./">
+        <i class="bi bi-google-drive me-2 fs-3 text-primary"></i>
+        <span class="fw-bold">Drive Gallery</span>
+      </a>
+    </div>
+  </nav>
+
+  <main class="container py-4">
+    <div class="filter-bar">
+      <div class="input-group input-group-sm shadow-sm">
+        <span class="input-group-text bg-white"><i class="bi bi-calendar-date"></i></span>
+        <input type="date" id="datePicker" class="form-control" onchange="filterByDate()">
+        <select id="sortSelect" class="form-select" style="max-width: 140px;" onchange="filterByDate()">
+          <option value="newest">Terbaru</option>
+          <option value="oldest">Terlama</option>
+          <option value="name">Nama A-Z</option>
+        </select>
+        <button class="btn btn-outline-secondary" type="button" onclick="resetFilter()">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div id="filterInfo" class="text-center text-muted small mt-1" style="display:none;"></div>
+    </div>
+
+    <div id="loader" class="text-center my-5">
+      <div class="spinner-border text-primary" role="status"></div>
+      <p class="mt-2">Loading images...</p>
+    </div>
+
+    <div id="gallery" class="row g-3"></div>
+
+    <div id="loadMore" class="text-center mt-4" style="display:none;">
+      <button class="btn btn-outline-primary btn-sm" onclick="loadMore()">
+        <i class="bi bi-plus-circle"></i> Load More
+      </button>
+    </div>
+
+    <div id="errorBox" class="alert alert-danger mt-4" style="display:none;"></div>
+  </main>
+
+  <footer class="text-white py-3 mt-5">
+    <div class="container text-center">
+      <p class="text-muted small mb-0">© 2026 Drive Gallery</p>
+    </div>
+  </footer>
+
+  <!-- Modal -->
+  <div class="modal fade" id="imgModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content bg-dark position-relative">
+        <div class="position-absolute top-0 end-0 m-3 d-flex gap-2" style="z-index:1056">
+          <button class="btn btn-light btn-sm" onclick="copyLink()">
+            <i class="bi bi-link-45deg"></i>
+          </button>
+          <button id="downloadBtn" class="btn btn-success btn-sm" onclick="downloadImage()">
+            <i class="bi bi-download"></i>
+          </button>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+
+        <button class="modal-nav prev" onclick="prevImage()">
+          <i class="bi bi-chevron-left"></i>
+        </button>
+        <button class="modal-nav next" onclick="nextImage()">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+
+        <div class="modal-body d-flex align-items-center justify-content-center p-0">
+          <img id="modalImg" src="" class="modal-img w-100">
+        </div>
+
+        <div class="modal-footer text-white justify-content-center border-0 flex-column">
+          <small id="modalCaption"></small>
+          <small id="modalDate" class="text-muted"></small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_KEY = 'AIzaSyAKIWuGQ4RcbH3z1NGad4Y_GG_6WwLoOoA';
+    const FOLDER_ID = '1xiUpPEvwtdH39kO478YCdNFfYZ6ZPLej';
+
+    let pageToken = null;
+    let currentImages = [];
+    let currentImageId = null;
+    let modalInstance = null;
+    let selectedDate = null;
+    let currentSort = 'newest';
+
+    window.onload = () => {
+      loadGallery().then(() => checkHash());
+    };
+
+    function checkHash() {
+      const hash = window.location.hash.replace('#img-', '');
+      if (hash) openModalById(hash, false);
+    }
+
+    function filterByDate() {
+      selectedDate = document.getElementById('datePicker').value;
+      currentSort = document.getElementById('sortSelect').value;
+
+      if (selectedDate) {
+        const date = new Date(selectedDate);
+        document.getElementById('filterInfo').style.display = 'block';
+        document.getElementById('filterInfo').textContent =
+          `Filter: ${date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+      } else {
+        document.getElementById('filterInfo').style.display = 'none';
+      }
+
+      loadGallery();
+    }
+
+    function resetFilter() {
+      document.getElementById('datePicker').value = '';
+      document.getElementById('sortSelect').value = 'newest';
+      selectedDate = null;
+      currentSort = 'newest';
+      document.getElementById('filterInfo').style.display = 'none';
+      loadGallery();
+    }
+
+    async function loadGallery() {
+      document.getElementById('loader').style.display = 'block';
+      document.getElementById('gallery').innerHTML = '';
+      currentImages = [];
+      pageToken = null;
+      await fetchFiles();
+      document.getElementById('loader').style.display = 'none';
+    }
+
+    async function fetchFiles() {
+      let query = `'${FOLDER_ID}' in parents and mimeType contains 'image/' and trashed=false`;
+
+      if (selectedDate) {
+        query += ` and modifiedTime >= '${selectedDate}T00:00:00'`;
+        query += ` and modifiedTime <= '${selectedDate}T23:59:59'`;
+      }
+
+      let orderBy = 'modifiedTime desc';
+      if (currentSort === 'oldest') orderBy = 'modifiedTime';
+      if (currentSort === 'name') orderBy = 'name';
+
+      let url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=nextPageToken,files(id,name,thumbnailLink,modifiedTime)&orderBy=${orderBy}&pageSize=24&key=${API_KEY}`;
+
+      if (pageToken) url += `&pageToken=${pageToken}`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.error) {
+          showError('Error: ' + data.error.message);
+          return;
+        }
+
+        displayFiles(data.files || []);
+        pageToken = data.nextPageToken;
+        document.getElementById('loadMore').style.display = pageToken? 'block' : 'none';
+
+      } catch (err) {
+        showError('Gagal load data: ' + err.message);
+      }
+    }
+
+    function displayFiles(files) {
+      const gallery = document.getElementById('gallery');
+
+      if (files.length === 0 &&!pageToken) {
+        gallery.innerHTML = '<div class="col-12 text-center text-muted py-5"><i class="bi bi-calendar-x fs-1"></i><p>Tidak ada foto di tanggal ini</p></div>';
+        return;
+      }
+
+      files.forEach((file) => {
+        const thumbUrl = file.thumbnailLink.replace('=s220', '=w600');
+        const date = formatDate(file.modifiedTime);
+
+        // Simpan data file, cek duplikat
+        if (!currentImages.find(img => img.id === file.id)) {
+          currentImages.push({id: file.id, name: file.name, date: file.modifiedTime});
+        }
+
+        const col = document.createElement('div');
+        col.className = 'col-6 col-md-4 col-lg-3';
+        col.innerHTML = `
+          <div class="card shadow-sm border-0">
+            <img src="${thumbUrl}" class="gallery-img" onclick="openModalById('${file.id}')" alt="${file.name}" loading="lazy">
+            <div class="card-body p-2">
+              <p class="card-title mb-1 text-truncate" title="${file.name}">
+                <i class="bi bi-image text-secondary"></i> ${file.name}
+              </p>
+              <p class="card-date mb-0">
+                <i class="bi bi-calendar3"></i> ${date}
+              </p>
+            </div>
+          </div>
+        `;
+        gallery.appendChild(col);
+      });
+    }
+
+    function formatDate(isoString) {
+      const date = new Date(isoString);
+      return date.toLocaleDateString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    // Buka modal pakai ID, bukan index
+    function openModalById(id, updateHash = true) {
+      const img = currentImages.find(item => item.id === id);
+      if (!img) return;
+
+      currentImageId = id;
+      updateModal();
+
+      if (!modalInstance) {
+        modalInstance = new bootstrap.Modal(document.getElementById('imgModal'));
+      }
+      modalInstance.show();
+
+      if (updateHash) {
+        history.pushState(null, '', `#img-${id}`);
+      }
+    }
+
+    function updateModal() {
+      const img = currentImages.find(item => item.id === currentImageId);
+      if (!img) return;
+
+      document.getElementById('modalImg').src = `https://drive.google.com/thumbnail?id=${img.id}&sz=w2000`;
+      document.getElementById('modalCaption').textContent = img.name;
+      document.getElementById('modalDate').textContent = formatDate(img.date);
+    }
+
+    function getCurrentIndex() {
+      return currentImages.findIndex(item => item.id === currentImageId);
+    }
+
+    function nextImage() {
+      const idx = getCurrentIndex();
+      const nextIdx = (idx + 1) % currentImages.length;
+      currentImageId = currentImages[nextIdx].id;
+      updateModal();
+      history.replaceState(null, '', `#img-${currentImageId}`);
+    }
+
+    function prevImage() {
+      const idx = getCurrentIndex();
+      const prevIdx = (idx - 1 + currentImages.length) % currentImages.length;
+      currentImageId = currentImages[prevIdx].id;
+      updateModal();
+      history.replaceState(null, '', `#img-${currentImageId}`);
+    }
+
+    async function downloadImage() {
+      const img = currentImages.find(item => item.id === currentImageId);
+      const btn = document.getElementById('downloadBtn');
+
+      try {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        const url = `https://www.googleapis.com/drive/v3/files/${img.id}?alt=media&key=${API_KEY}`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Download gagal');
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = img.name;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(downloadUrl);
+        document.body.removeChild(a);
+      } catch (err) {
+        alert('Gagal download: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download"></i>';
+      }
+    }
+
+    document.getElementById('imgModal').addEventListener('hidden.bs.modal', () => {
+      history.pushState(null, '', window.location.pathname);
+      currentImageId = null;
+    });
+
+    window.addEventListener('hashchange', checkHash);
+
+    function copyLink() {
+      navigator.clipboard.writeText(window.location.href).then(() => {
+        alert('Link berhasil dicopy!');
+      });
+    }
+
+    document.addEventListener('keydown', (e) => {
+      const modal = document.getElementById('imgModal');
+      if (modal.classList.contains('show')) {
+        if (e.key === 'ArrowRight') nextImage();
+        if (e.key === 'ArrowLeft') prevImage();
+        if (e.key === 'Escape') modalInstance.hide();
+      }
+    });
+
+    function loadMore() {
+      if (pageToken) {
+        document.getElementById('loader').style.display = 'block';
+        fetchFiles().then(() => {
+          document.getElementById('loader').style.display = 'none';
+        });
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('loader').style.display = 'none';
+      document.getElementById('errorBox').textContent = msg;
+      document.getElementById('errorBox').style.display = 'block';
+    }
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
